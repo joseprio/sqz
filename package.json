@@ -1,0 +1,69 @@
+{
+  "name": "sqz",
+  "version": "0.1.0",
+  "description": "Convert between PNG/APNG, GIF, WebP and AVIF and squeeze the result: lossless, palette-quantized or lossy at a target SSIMULACRA2 score.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Josep del Rio",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joseprio/sqz.git"
+  },
+  "homepage": "https://joseprio.github.io/sqz/",
+  "bugs": "https://github.com/joseprio/sqz/issues",
+  "keywords": [
+    "png",
+    "apng",
+    "zopfli",
+    "optimize",
+    "compress",
+    "gif",
+    "webp",
+    "avif",
+    "quantize",
+    "cli"
+  ],
+  "bin": {
+    "sqz": "./dist/cli.js"
+  },
+  "main": "./dist/node.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "node": "./dist/node.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build:web": "vite build --config web/vite.config.ts",
+    "preview:web": "vite preview --config web/vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "fixtures": "python scripts/make-fixtures.py",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@jsquash/webp": "^1.5.0",
+    "fflate": "^0.8.3",
+    "image-q": "^4.0.0",
+    "omggif": "^1.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/omggif": "^1.0.5",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
+  }
+}
