@@ -1,6 +1,6 @@
 {
   "name": "sqz",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Convert between PNG/APNG, GIF, WebP and AVIF and squeeze the result: lossless, palette-quantized or lossy at a target SSIMULACRA2 score.",
   "type": "module",
   "license": "MIT",
