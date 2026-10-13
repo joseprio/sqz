@@ -42,11 +42,13 @@ including the input, are only replaced with --force. A lossless output is never 
 than an input that is already a lossless file of the same format.
 
 Examples:
-  npx sqz animation.gif                     # → animation.png (APNG)
-  npx sqz -t webp -m lossy photo.png        # → photo.quantized.webp + photo.lossy.webp
-  npx sqz -t avif -m lossy -T 70 -r photos -o out/
-  npx sqz -f --max *.png                    # recompress PNGs in place
-  cat in.webp | npx sqz - -o - > out.png
+  sqz animation.gif                         # → animation.png (APNG)
+  sqz -t webp -m lossy photo.png            # → photo.quantized.webp + photo.lossy.webp
+  sqz -t avif -m lossy -T 70 -r photos -o out/
+  sqz -f --max *.png                        # recompress PNGs in place
+  cat in.webp | sqz - -o - > out.png
+
+Run without installing: npx @joseprio/sqz …   Install: npm i -g @joseprio/sqz
 `;
 
 const EXTENSIONS = new Set(['.png', '.apng', '.gif', '.webp', '.avif']);

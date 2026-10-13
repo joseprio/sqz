@@ -3,9 +3,11 @@
 Convert between PNG/APNG, GIF, WebP and AVIF, and squeeze the result as small as it can go.
 
 ```sh
-npx sqz animation.gif                  # → animation.png (animated APNG)
-npx sqz -t webp -m lossy photo.png     # → photo.quantized.webp + photo.lossy.webp
+npx @joseprio/sqz animation.gif                  # → animation.png (animated APNG)
+npx @joseprio/sqz -t webp -m lossy photo.png     # → photo.quantized.webp + photo.lossy.webp
 ```
+
+Or install it once with `npm i -g @joseprio/sqz` and run `sqz` directly.
 
 The same engine runs on the website at **https://joseprio.github.io/sqz/**. Everything happens in your browser and nothing is uploaded. Pick an output format, and the site produces every version below side by side, with sizes and quality scores, so you can choose which one to download.
 
@@ -66,10 +68,10 @@ sqz [options] <file|dir|->...
 sqz never overwrites existing files, including the input itself, unless you pass `--force`.
 
 ```sh
-npx sqz -t gif -m lossy clip.webp               # animated WebP → quantized GIF
-npx sqz -t avif -m lossy -T 70 -r photos -o out/
-npx sqz -f --max *.png                          # recompress PNGs in place
-cat in.webp | npx sqz - -o - > out.png
+npx @joseprio/sqz -t gif -m lossy clip.webp       # animated WebP → quantized GIF
+npx @joseprio/sqz -t avif -m lossy -T 70 -r photos -o out/
+npx @joseprio/sqz -f --max *.png                  # recompress PNGs in place
+cat in.webp | npx @joseprio/sqz - -o - > out.png
 ```
 
 ## Metadata
@@ -79,7 +81,7 @@ By default sqz keeps metadata. PNG output keeps colour information (`iCCP`, `sRG
 ## Library
 
 ```js
-import { convert } from 'sqz';
+import { convert } from '@joseprio/sqz';
 
 const { variants } = await convert(bytes, { format: 'webp', target: 75 });
 for (const v of variants) console.log(v.variant, v.size, v.score, v.setting, v.error);

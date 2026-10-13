@@ -1,5 +1,5 @@
 {
-  "name": "sqz",
+  "name": "@joseprio/sqz",
   "version": "1.0.0",
   "description": "Convert between PNG/APNG, GIF, WebP and AVIF and squeeze the result: lossless, palette-quantized or lossy at a target SSIMULACRA2 score.",
   "type": "module",
@@ -24,7 +24,7 @@
     "cli"
   ],
   "bin": {
-    "sqz": "./dist/cli.js"
+    "sqz": "dist/cli.js"
   },
   "main": "./dist/node.js",
   "types": "./dist/index.d.ts",
@@ -41,6 +41,9 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsup",
