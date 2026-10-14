@@ -304,14 +304,14 @@ body.dragging .drop {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 12px;
+  padding: 20px;
 }
 .source-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 8px;
 }
 .source {
@@ -728,6 +728,220 @@ dialog::backdrop {
 }
 .side.right {
   right: 8px;
+}
+
+/* source actions */
+.source-actions {
+  display: flex;
+  gap: 2px;
+}
+.source-actions button {
+  padding: 7px;
+  color: var(--muted);
+}
+.source-actions button:hover:not(:disabled) {
+  color: var(--text);
+}
+.source-actions svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* An edited image: its resize/crop button shows in the accent colour. */
+.source-actions .edit[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* Size and edit summary wrap rather than hide the edit. */
+.source .meta {
+  white-space: normal;
+}
+.source .meta .edited {
+  color: var(--accent);
+}
+
+/* resize & crop dialog */
+dialog.edit {
+  width: min(1080px, calc(100vw - 32px));
+}
+.edit-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+}
+.edit-stage {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px;
+  border-radius: 10px;
+  overflow: hidden;
+  padding: 12px;
+}
+.edit-canvas {
+  position: relative;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+}
+.edit-canvas img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+/* The dimming outside the crop is clipped to the image; the handles are not. */
+.shade {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.hole {
+  position: absolute;
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.55);
+}
+.crop {
+  position: absolute;
+  outline: 1.5px solid #fff;
+  cursor: move;
+}
+.crop:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+/* Rule-of-thirds guides. */
+.crop::before,
+.crop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 0 solid rgb(255 255 255 / 0.35);
+}
+.crop::before {
+  left: 33.33%;
+  right: 33.33%;
+  border-width: 0 1px;
+}
+.crop::after {
+  top: 33.33%;
+  bottom: 33.33%;
+  border-width: 1px 0;
+}
+.crop span {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  z-index: 1;
+}
+.crop span::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  background: #fff;
+  border: 1.5px solid var(--accent);
+  border-radius: 3px;
+}
+@media (pointer: coarse) {
+  .crop span {
+    width: 36px;
+    height: 36px;
+    margin: -18px 0 0 -18px;
+  }
+  .crop span::before {
+    inset: 11px;
+  }
+}
+.crop [data-h='nw'] { left: 0; top: 0; cursor: nwse-resize; }
+.crop [data-h='n'] { left: 50%; top: 0; cursor: ns-resize; }
+.crop [data-h='ne'] { left: 100%; top: 0; cursor: nesw-resize; }
+.crop [data-h='e'] { left: 100%; top: 50%; cursor: ew-resize; }
+.crop [data-h='se'] { left: 100%; top: 100%; cursor: nwse-resize; }
+.crop [data-h='s'] { left: 50%; top: 100%; cursor: ns-resize; }
+.crop [data-h='sw'] { left: 0; top: 100%; cursor: nesw-resize; }
+.crop [data-h='w'] { left: 0; top: 50%; cursor: ew-resize; }
+.edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.edit-fields fieldset {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 0;
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.edit-fields legend {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 0 4px;
+}
+.nums {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.nums.two {
+  grid-template-columns: 1fr 1fr;
+}
+.nums label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.nums input {
+  font: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.nums input[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+button.small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.edit-out {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+.edit-actions #edit-reset {
+  margin-right: auto;
+}
+
+@media (max-width: 760px) {
+  .edit-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {

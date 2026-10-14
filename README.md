@@ -105,6 +105,8 @@ const { variants } = await convert(bytes, { format: 'webp', target: 75 });
 for (const v of variants) console.log(v.variant, v.size, v.score, v.setting, v.error);
 ```
 
+`resize: { width, height }` scales the image first (Lanczos3 on an axis that shrinks, bicubic on one that grows, with premultiplied alpha), and `crop: { x, y, width, height }` then keeps a rectangle of the resized image. Animation frames and HDR gain maps follow. On the website, the crop button next to each image does the same with a live preview; the edit only applies to the copy each Compress makes, so the original is never touched.
+
 `variants` defaults to every version the format supports. Pass `variants: ['lossless']` (or `variantsFor(format, 'lossy')`) to make fewer. The `ssimulacra2(reference, distorted, width, height)` metric is exported too.
 
 Works in Node (20 or later) and in browsers or workers through any bundler that handles `new URL(…, import.meta.url)` assets. `squeeze` is CPU-bound, so run it in a worker when a UI or server has to stay responsive.

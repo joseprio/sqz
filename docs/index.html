@@ -6,8 +6,8 @@
     <title>sqz — convert images to any format, as small as they can be</title>
     <meta name="description" content="Convert between PNG, APNG, GIF, WebP, AVIF and JPEG, HDR included. Get a lossless file plus lossy versions tuned to the visual quality you choose, then pick the one you want. Runs entirely in your browser." />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff5a36'/%3E%3Cpath d='M9 11h14M11 16h10M13 21h6' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
-    <script type="module" crossorigin src="./assets/index-Dhytyv90.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-dJWDKa0W.css">
+    <script type="module" crossorigin src="./assets/index-Bq4OUVSY.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Kp06J38D.css">
   </head>
   <body>
     <div class="page">
@@ -118,6 +118,55 @@
         <div class="compare-handle" id="compare-handle" tabindex="0" role="slider" aria-label="Comparison divider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="grip" aria-hidden="true"></span></div>
         <select class="side left" id="compare-left" aria-label="Left side"></select>
         <select class="side right" id="compare-right" aria-label="Right side"></select>
+      </div>
+    </dialog>
+
+    <dialog id="edit" class="edit" aria-labelledby="edit-title">
+      <div class="compare-head">
+        <strong id="edit-title"></strong>
+        <button type="button" class="ghost" id="edit-close" aria-label="Close">✕</button>
+      </div>
+      <div class="edit-body">
+        <div class="edit-stage" id="edit-stage">
+          <div class="edit-canvas" id="edit-canvas">
+            <img id="edit-img" alt="" draggable="false" />
+            <div class="shade" aria-hidden="true"><div class="hole" id="crop-hole"></div></div>
+            <div class="crop" id="crop" tabindex="0" role="group" aria-label="Crop area. Drag to move it, drag a corner or edge to resize it, or move it with the arrow keys.">
+              <span data-h="nw"></span><span data-h="n"></span><span data-h="ne"></span><span data-h="e"></span>
+              <span data-h="se"></span><span data-h="s"></span><span data-h="sw"></span><span data-h="w"></span>
+            </div>
+          </div>
+        </div>
+        <div class="edit-fields">
+          <fieldset>
+            <legend>Resize</legend>
+            <div class="nums two">
+              <label>Width <input type="number" id="rs-w" min="1" max="32768" step="1" inputmode="numeric" /></label>
+              <label>Height <input type="number" id="rs-h" min="1" max="32768" step="1" inputmode="numeric" /></label>
+            </div>
+            <label class="check"><input type="checkbox" id="rs-keep" /> Keep aspect ratio</label>
+            <p class="hint" id="rs-note"></p>
+            <button type="button" class="ghost small" id="rs-reset">Original size</button>
+          </fieldset>
+          <fieldset>
+            <legend>Crop</legend>
+            <div class="nums two">
+              <label>X <input type="number" id="cr-x" min="0" step="1" inputmode="numeric" /></label>
+              <label>Y <input type="number" id="cr-y" min="0" step="1" inputmode="numeric" /></label>
+              <label>Width <input type="number" id="cr-w" min="1" step="1" inputmode="numeric" /></label>
+              <label>Height <input type="number" id="cr-h" min="1" step="1" inputmode="numeric" /></label>
+            </div>
+            <p class="hint">Drag on the image to pick the area, or type it in pixels of the resized image.</p>
+            <button type="button" class="ghost small" id="cr-reset">Whole image</button>
+          </fieldset>
+          <p class="edit-out" id="edit-out" aria-live="polite"></p>
+          <p class="hint">Applied to a copy when you press Compress; the original file is never changed.</p>
+          <div class="edit-actions">
+            <button type="button" class="ghost" id="edit-reset">Reset</button>
+            <button type="button" class="ghost" id="edit-cancel">Cancel</button>
+            <button type="button" class="primary" id="edit-apply">Apply</button>
+          </div>
+        </div>
       </div>
     </dialog>
 

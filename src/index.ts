@@ -12,6 +12,7 @@ import { tuneColors, tunePngStep, tuneQuality } from './process/target.js';
 import { lossyFilter } from './process/lossy.js';
 import { transformFrames } from './process/animate.js';
 import { cicpOf, clliOf, hdrTransfer, renderGainMap, sdrChunks, splitHdr, toneMapToSdr, TRANSFER, type Colour } from './process/hdr.js';
+import { transformImage } from './process/resize.js';
 import { concat } from './util/bytes.js';
 import type { ConvertOptions, ConvertResult, Frame, GainMap, MetaChunk, Mode, OutputFormat, RasterImage, Variant, VariantResult } from './types.js';
 
@@ -58,13 +59,17 @@ export async function convert(input: Uint8Array, options: ConvertOptions = {}): 
   const hdr = img.gainMap ? 'gain map' : hdrTransfer(img) ? (cicpOf(img.chunks)!.transfer === TRANSFER.PQ ? 'PQ' : 'HLG') : undefined;
   const hadHdr = !!hdr;
   if (options.stripHdr && hadHdr) img = sdrVersion(img);
+  // Resizing and cropping to the same size is no edit: the original can still be reused.
+  const unedited = img;
+  img = transformImage(img, options.resize, options.crop);
+  const edited = img !== unedited;
   report(null, 'decode', 1);
 
   const results: VariantResult[] = [];
   for (const variant of variants) {
     let r: VariantResult;
     try {
-      r = await makeVariant(input, img, format, variant, options, hadHdr, (stage, f) => report(variant, stage, f));
+      r = await makeVariant(input, img, format, variant, options, hadHdr, edited, (stage, f) => report(variant, stage, f));
     } catch (e) {
       r = { variant, format, size: 0, mimeType: MIME[format], extension: EXTENSION[format], description: '', keptOriginal: false, warnings: [], error: (e as Error).message };
     }
@@ -107,6 +112,7 @@ async function makeVariant(
   variant: Variant,
   o: ConvertOptions,
   hadHdr: boolean,
+  edited: boolean,
   progress: (stage: string, fraction: number) => void,
 ): Promise<VariantResult> {
   const effort = o.effort ?? 'default';
@@ -283,7 +289,7 @@ async function makeVariant(
   // Never hand back something bigger than an equally good file we were given.
   let keptOriginal = false;
   // Stripping must not take HDR signalling with it, and stripHdr must not hand HDR back.
-  const original = (o.stripHdr || o.strip) && hadHdr ? null : reusableOriginal(input, format, !!o.strip);
+  const original = edited || ((o.stripHdr || o.strip) && hadHdr) ? null : reusableOriginal(input, format, !!o.strip);
   if (original && original.length <= data.length) {
     data = original;
     keptOriginal = true;

@@ -143,6 +143,19 @@ function initSettings() {
 
 // ---------- source images ----------
 
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Resize, then crop (in resized pixels). Only ever applied to the copy a job compresses. */
+interface Edit {
+  resize?: { width: number; height: number };
+  crop?: Rect;
+}
+
 interface Source {
   file: File;
   input: Uint8Array;
@@ -150,8 +163,27 @@ interface Source {
   el: HTMLLIElement;
   /** Removed from the source list; its URL lives on while results still show it. */
   removed: boolean;
+  /** Size as the browser shows it (EXIF orientation applied, like sqz's decoder); 0 if it can't. */
+  width: number;
+  height: number;
+  edit?: Edit;
+  /** Lossless renders of the original with an edit applied, for comparing edited jobs; by editKey. */
+  references: Map<string, { url?: string }>;
 }
 const sources: Source[] = [];
+
+const editKey = (e?: Edit) =>
+  e ? `${e.resize ? `${e.resize.width}x${e.resize.height}` : ''}|${e.crop ? `${e.crop.x},${e.crop.y},${e.crop.width},${e.crop.height}` : ''}` : '';
+
+/** Output size of an edit, e.g. "600×400" or "300×200 crop". */
+function editLabel(source: Source, e: Edit): string {
+  const size = e.crop ?? e.resize ?? { width: source.width, height: source.height };
+  return `${size.width}×${size.height}${e.crop ? ' crop' : ''}`;
+}
+
+const ICON_CROP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>';
+const ICON_TRASH =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
 
 const ACCEPT = /\.(png|apng|gif|webp|avif|jpe?g)$/i;
 async function addFiles(files: Iterable<File>) {
@@ -159,17 +191,66 @@ async function addFiles(files: Iterable<File>) {
     if (!ACCEPT.test(file.name) && !/^image\/(png|apng|gif|webp|avif|jpeg)$/.test(file.type)) continue;
     const el = document.createElement('li');
     el.className = 'source';
-    el.innerHTML = `<div class="thumb small"><img alt="" /></div><div class="info"><div class="name"></div><div class="meta"></div></div><button type="button" class="ghost icon remove" aria-label="Remove">✕</button>`;
-    const source: Source = { file, input: new Uint8Array(await file.arrayBuffer()), url: URL.createObjectURL(file), el, removed: false };
+    el.innerHTML = `<div class="thumb small"><img alt="" /></div><div class="info"><div class="name"></div><div class="meta"></div></div>
+      <div class="source-actions">
+        <button type="button" class="ghost icon edit" title="Resize or crop" aria-pressed="false" disabled>${ICON_CROP}</button>
+        <button type="button" class="ghost icon remove" title="Remove">${ICON_TRASH}</button>
+      </div>`;
+    const source: Source = {
+      file,
+      input: new Uint8Array(await file.arrayBuffer()),
+      url: URL.createObjectURL(file),
+      el,
+      removed: false,
+      width: 0,
+      height: 0,
+      references: new Map(),
+    };
     el.querySelector('img')!.src = source.url;
     el.querySelector('.name')!.textContent = file.name;
-    el.querySelector('.meta')!.textContent = formatBytes(source.input.length);
+    el.querySelector<HTMLButtonElement>('.edit')!.setAttribute('aria-label', `Resize or crop ${file.name}`);
     el.querySelector<HTMLButtonElement>('.remove')!.setAttribute('aria-label', `Remove ${file.name}`);
+    el.querySelector('.edit')!.addEventListener('click', () => openEdit(source));
     el.querySelector('.remove')!.addEventListener('click', () => removeSource(source));
     sources.push(source);
     $('source-list').append(el);
+    renderSource(source);
+    void measure(source);
   }
   syncCompressButton();
+}
+
+/** Learn the image size from the browser, which the resize/crop dialog needs. */
+async function measure(source: Source) {
+  const probe = new Image();
+  try {
+    // The load event, not decode(): decode() waits while the tab is in the background.
+    await new Promise((resolve, reject) => {
+      probe.onload = resolve;
+      probe.onerror = reject;
+      probe.src = source.url;
+    });
+    source.width = probe.naturalWidth;
+    source.height = probe.naturalHeight;
+  } catch {
+    source.el.querySelector<HTMLButtonElement>('.edit')!.title = 'This browser cannot preview the image, so it cannot be resized or cropped here';
+  }
+  renderSource(source);
+}
+
+function renderSource(source: Source) {
+  const meta = source.el.querySelector<HTMLElement>('.meta')!;
+  const dims = source.width ? ` · ${source.width}×${source.height}` : '';
+  meta.textContent = formatBytes(source.input.length) + dims;
+  if (source.edit) {
+    const tag = document.createElement('span');
+    tag.className = 'edited';
+    tag.textContent = ` → ${editLabel(source, source.edit)}`;
+    meta.append(tag);
+  }
+  const button = source.el.querySelector<HTMLButtonElement>('.edit')!;
+  button.disabled = !source.width;
+  button.setAttribute('aria-pressed', String(!!source.edit));
 }
 
 function removeSource(source: Source) {
@@ -182,7 +263,10 @@ function removeSource(source: Source) {
 
 /** Free a source's object URL once neither the source list nor any result uses it. */
 function releaseSource(source: Source) {
-  if (source.removed && !items.some((i) => i.source === source)) URL.revokeObjectURL(source.url);
+  if (source.removed && !items.some((i) => i.source === source)) {
+    URL.revokeObjectURL(source.url);
+    for (const r of source.references.values()) if (r.url) URL.revokeObjectURL(r.url);
+  }
 }
 
 function syncCompressButton() {
@@ -192,18 +276,20 @@ function syncCompressButton() {
   button.disabled = n === 0;
   button.textContent = n ? `Compress ${n === 1 ? '1 image' : `${n} images`} to ${FORMAT_LABEL[settings.format]}` : 'Compress';
   const key = settingsKey(settings);
-  const done = sources.filter((s) => items.some((i) => i.source === s && settingsKey(i.settings) === key && i.status !== 'error')).length;
+  const done = sources.filter((s) => items.some((i) => i.source === s && jobKey(i) === key + editKey(s.edit) && i.status !== 'error')).length;
   $('compress-note').textContent = done === n && n ? 'Already compressed with these settings; change a setting to add another version.' : done ? `${done} already done with these settings will be skipped.` : '';
 }
 
-/** One new job per source image, with a frozen copy of the current settings. Identical jobs are skipped. */
+const jobKey = (i: Item) => settingsKey(i.settings) + editKey(i.edit);
+
+/** One new job per source image, with a frozen copy of the current settings and edit. Identical jobs are skipped. */
 function compress() {
   const snapshot = { ...settings };
   const key = settingsKey(snapshot);
   let added = 0;
   for (const source of sources) {
-    if (items.some((i) => i.source === source && settingsKey(i.settings) === key && i.status !== 'error')) continue;
-    addItem(source, snapshot);
+    if (items.some((i) => i.source === source && jobKey(i) === key + editKey(source.edit) && i.status !== 'error')) continue;
+    addItem(source, snapshot, source.edit);
     added++;
   }
   syncCompressButton();
@@ -218,6 +304,8 @@ interface Item {
   id: number;
   source: Source;
   settings: Settings;
+  /** The source's resize/crop when the job was made; edits made later don't affect it. */
+  edit?: Edit;
   status: Status;
   progress: Partial<Record<Variant, number>>;
   info?: Omit<ConvertResult, 'variants'>;
@@ -235,7 +323,7 @@ interface Item {
 const items: Item[] = [];
 let itemCounter = 0;
 
-function addItem(source: Source, s: Settings) {
+function addItem(source: Source, s: Settings, edit?: Edit) {
   const el = document.createElement('li');
   el.className = 'row';
   el.innerHTML = `
@@ -252,10 +340,12 @@ function addItem(source: Source, s: Settings) {
       </div>
     </div>
     <div class="variants" role="radiogroup"></div>`;
-  const item: Item = { id: ++itemCounter, source, settings: s, status: 'queued', progress: {}, variants: {}, el, running: new Set(), pending: 0 };
+  const item: Item = { id: ++itemCounter, source, settings: s, edit, status: 'queued', progress: {}, variants: {}, el, running: new Set(), pending: 0 };
+  const label = jobLabel(item);
   el.querySelector('.file')!.textContent = source.file.name;
-  el.querySelector('.job-tag')!.textContent = settingsLabel(s);
-  el.querySelector('.remove')!.setAttribute('aria-label', `Remove ${source.file.name} (${settingsLabel(s)})`);
+  el.querySelector('.job-tag')!.textContent = label;
+  el.querySelector('.remove')!.setAttribute('aria-label', `Remove ${source.file.name} (${label})`);
+  if (edit) ensureReference(source, edit);
   el.querySelector('.variants')!.setAttribute('aria-label', `Versions of ${source.file.name}`);
   el.querySelector('.copy')!.addEventListener('click', (e) => void copyDataUrl(item, e.currentTarget as HTMLButtonElement));
   el.querySelector('.remove')!.addEventListener('click', () => removeItem(item));
@@ -403,6 +493,8 @@ function pump() {
       strip: s.strip,
       stripHdr: s.stripHdr,
       effort: s.max ? 'max' : 'default',
+      resize: item.edit?.resize,
+      crop: item.edit?.crop,
     };
     slot.worker.postMessage({ id: task.id, input: item.source.input.slice(), options });
   }
@@ -570,14 +662,44 @@ interface CompareSource {
   url: string;
 }
 
-/** The original plus every finished version of every job made from the same source image. */
+const jobLabel = (item: Item) => settingsLabel(item.settings) + (item.edit ? ` · ${editLabel(item.source, item.edit)}` : '');
+
+/**
+ * A lossless render of the original with an edit applied, so edited jobs can be compared
+ * pixel for pixel. Made once per distinct edit, in its own short-lived worker.
+ */
+function ensureReference(source: Source, edit: Edit) {
+  const key = editKey(edit);
+  if (source.references.has(key)) return;
+  const ref: { url?: string } = {};
+  source.references.set(key, ref);
+  const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+  w.onmessage = (e: MessageEvent<WorkerMessage>) => {
+    const v = e.data.variant;
+    if (v?.data) {
+      ref.url = URL.createObjectURL(new Blob([v.data as BlobPart], { type: v.mimeType }));
+      if (compareSource === source) refreshCompare();
+      summarize();
+    }
+    if (e.data.done || e.data.error !== undefined) w.terminate();
+  };
+  w.onerror = () => w.terminate();
+  const options: ConvertOptions = { format: 'png', variants: ['lossless'], effort: 'fast', resize: edit.resize, crop: edit.crop };
+  w.postMessage({ id: 0, input: source.input.slice(), options });
+}
+
+/** The original, the original as each edit leaves it, and every finished version of every job made from it. */
 function compareSources(source: Source): CompareSource[] {
   const out: CompareSource[] = [{ key: 'original', label: `Original · ${formatBytes(source.input.length)}`, url: source.url }];
   const jobs = items.filter((i) => i.source === source);
+  for (const [key, ref] of source.references) {
+    const job = jobs.find((j) => editKey(j.edit) === key);
+    if (ref.url && job?.edit) out.push({ key: `ref:${key}`, label: `Original, ${editLabel(source, job.edit)}`, url: ref.url });
+  }
   for (const item of jobs) {
     // Name the job only when another job of the same format could be confused with it.
     const sameFormat = jobs.filter((j) => j.settings.format === item.settings.format).length > 1;
-    const which = sameFormat ? ` (${settingsLabel(item.settings).split(' · ').slice(1).join(', ')})` : '';
+    const which = sameFormat ? ` (${jobLabel(item).split(' · ').slice(1).join(', ')})` : '';
     for (const variant of VARIANTS[item.settings.format]) {
       const v = item.variants[variant];
       if (!v?.url) continue;
@@ -613,6 +735,21 @@ function openCompare() {
   $<HTMLDialogElement>('compare').showModal();
 }
 
+/** What to compare a version against by default: the original, edited the same way if it was. */
+function defaultLeft(source: Source, rightKey: string | undefined): string {
+  const item = items.find((i) => i.source === source && rightKey?.startsWith(`${i.id}:`));
+  const ref = item?.edit && `ref:${editKey(item.edit)}`;
+  return ref && compareSources(source).some((s) => s.key === ref) ? ref : 'original';
+}
+
+function fillCompareSelects(source: Source, left: string, right: string | undefined) {
+  const options = compareSources(source);
+  for (const [id, initial] of [['compare-left', left], ['compare-right', right]] as const) {
+    $<HTMLSelectElement>(id).replaceChildren(...options.map((s) => new Option(s.label, s.key, false, s.key === initial)));
+  }
+  showCompareSides();
+}
+
 function pickCompareImage(source: Source) {
   compareSource = source;
   $('compare-title').textContent = source.file.name;
@@ -620,10 +757,15 @@ function pickCompareImage(source: Source) {
   // Left defaults to the original, right to the first job's selected version.
   const first = items.find((i) => i.source === source && i.selected && i.variants[i.selected]?.url);
   const right = first ? `${first.id}:${first.selected}` : options[1]?.key;
-  for (const [id, initial] of [['compare-left', 'original'], ['compare-right', right]] as const) {
-    $<HTMLSelectElement>(id).replaceChildren(...options.map((s) => new Option(s.label, s.key, false, s.key === initial)));
-  }
-  showCompareSides();
+  fillCompareSelects(source, defaultLeft(source, right), right);
+}
+
+/** An edited original became ready: offer it, and switch to it if the plain original was only a stand-in. */
+function refreshCompare() {
+  if (!compareSource) return;
+  const left = $<HTMLSelectElement>('compare-left').value;
+  const right = $<HTMLSelectElement>('compare-right').value;
+  fillCompareSelects(compareSource, left === 'original' ? defaultLeft(compareSource, right) : left, right);
 }
 
 function showCompareSides() {
@@ -677,6 +819,262 @@ function initCompare() {
     if (next === undefined) return;
     e.preventDefault();
     setCompare(next);
+  });
+}
+
+// ---------- resize & crop dialog ----------
+
+const MAX_SIDE = 32768;
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** The dialog's working state; only Apply copies it onto the source. */
+interface Draft {
+  width: number;
+  height: number;
+  keep: boolean;
+  crop: Rect;
+}
+let editSource: Source | null = null;
+let draft: Draft = { width: 1, height: 1, keep: true, crop: { x: 0, y: 0, width: 1, height: 1 } };
+
+const fullCrop = (d: { width: number; height: number }): Rect => ({ x: 0, y: 0, width: d.width, height: d.height });
+const isFull = (r: Rect, d: { width: number; height: number }) => r.x === 0 && r.y === 0 && r.width === d.width && r.height === d.height;
+
+/** Keep a rectangle whole-pixel, at least 1×1, and inside a width × height image. */
+function fitRect(r: Rect, width: number, height: number): Rect {
+  const w = clamp(Math.round(r.width), 1, width);
+  const h = clamp(Math.round(r.height), 1, height);
+  return { x: clamp(Math.round(r.x), 0, width - w), y: clamp(Math.round(r.y), 0, height - h), width: w, height: h };
+}
+
+function openEdit(source: Source) {
+  if (!source.width) return;
+  editSource = source;
+  const size = source.edit?.resize ?? { width: source.width, height: source.height };
+  const keep = Math.round((size.width * source.height) / source.width) === size.height || Math.round((size.height * source.width) / source.height) === size.width;
+  draft = { ...size, keep, crop: source.edit?.crop ?? fullCrop(size) };
+  $('edit-title').textContent = `Resize and crop · ${source.file.name}`;
+  $<HTMLImageElement>('edit-img').src = source.url;
+  $<HTMLInputElement>('rs-keep').checked = keep;
+  $<HTMLDialogElement>('edit').showModal();
+  syncEdit();
+}
+
+/** Change the resize target; the crop scales with it so it keeps framing the same content. */
+function setResize(width: number, height: number) {
+  const c = draft.crop;
+  const sx = width / draft.width;
+  const sy = height / draft.height;
+  draft.crop = isFull(c, draft) ? fullCrop({ width, height }) : fitRect({ x: c.x * sx, y: c.y * sy, width: c.width * sx, height: c.height * sy }, width, height);
+  draft.width = width;
+  draft.height = height;
+}
+
+/** Fit the preview to the stage at the resized image's aspect ratio. */
+function layoutEdit() {
+  const stage = $('edit-stage');
+  const canvas = $('edit-canvas');
+  const pad = 40;
+  const availW = Math.max(80, stage.clientWidth - pad);
+  const availH = Math.max(80, Math.min(window.innerHeight * 0.62, 620) - pad);
+  const scale = Math.min(availW / draft.width, availH / draft.height);
+  canvas.style.width = `${Math.max(1, Math.round(draft.width * scale))}px`;
+  canvas.style.height = `${Math.max(1, Math.round(draft.height * scale))}px`;
+}
+
+/** Push the draft into the preview and every field except the one being typed in. */
+function syncEdit(typing?: HTMLInputElement) {
+  const src = editSource!;
+  layoutEdit();
+  const c = draft.crop;
+  for (const el of [$('crop'), $('crop-hole')]) {
+    el.style.left = `${(c.x / draft.width) * 100}%`;
+    el.style.top = `${(c.y / draft.height) * 100}%`;
+    el.style.width = `${(c.width / draft.width) * 100}%`;
+    el.style.height = `${(c.height / draft.height) * 100}%`;
+  }
+  const fields: [string, number, number, number][] = [
+    ['rs-w', draft.width, 1, MAX_SIDE],
+    ['rs-h', draft.height, 1, MAX_SIDE],
+    ['cr-x', c.x, 0, draft.width - 1],
+    ['cr-y', c.y, 0, draft.height - 1],
+    ['cr-w', c.width, 1, draft.width],
+    ['cr-h', c.height, 1, draft.height],
+  ];
+  for (const [id, value, min, max] of fields) {
+    const input = $<HTMLInputElement>(id);
+    input.min = String(min);
+    input.max = String(max);
+    if (input !== typing) {
+      input.value = String(value);
+      input.removeAttribute('aria-invalid');
+    }
+  }
+  const sx = draft.width / src.width;
+  const sy = draft.height / src.height;
+  const how = (s: number) => (s < 1 ? 'Lanczos' : s > 1 ? 'bicubic' : '');
+  const methods = [...new Set([how(sx), how(sy)].filter(Boolean))];
+  $('rs-note').textContent = methods.length
+    ? `${Math.round(sx * 100)}%${sx !== sy ? ` × ${Math.round(sy * 100)}%` : ''} of ${src.width}×${src.height}, ${methods.join(' and ')}`
+    : `Original size, ${src.width}×${src.height}`;
+  $('edit-out').textContent = `Output ${c.width}×${c.height}${isFull(c, draft) ? '' : `, cropped from ${draft.width}×${draft.height}`}`;
+}
+
+/** A field's whole-number value, or null (marked invalid) when it isn't one in range. */
+function readField(input: HTMLInputElement, min: number, max: number): number | null {
+  const v = Number(input.value);
+  const ok = input.value.trim() !== '' && Number.isInteger(v) && v >= min && v <= max;
+  input.setAttribute('aria-invalid', String(!ok));
+  return ok ? v : null;
+}
+
+function initEdit() {
+  const dlg = $<HTMLDialogElement>('edit');
+  const close = () => dlg.close();
+  $('edit-close').addEventListener('click', close);
+  $('edit-cancel').addEventListener('click', close);
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg) close();
+  });
+  dlg.addEventListener('close', () => (editSource = null));
+  window.addEventListener('resize', () => {
+    if (editSource) layoutEdit();
+  });
+
+  $('edit-apply').addEventListener('click', () => {
+    const src = editSource!;
+    const resized = draft.width !== src.width || draft.height !== src.height;
+    const cropped = !isFull(draft.crop, draft);
+    src.edit = resized || cropped ? { resize: resized ? { width: draft.width, height: draft.height } : undefined, crop: cropped ? { ...draft.crop } : undefined } : undefined;
+    renderSource(src);
+    syncCompressButton();
+    close();
+  });
+  $('edit-reset').addEventListener('click', () => {
+    const src = editSource!;
+    draft = { width: src.width, height: src.height, keep: true, crop: fullCrop(src) };
+    $<HTMLInputElement>('rs-keep').checked = true;
+    syncEdit();
+  });
+  $('rs-reset').addEventListener('click', () => {
+    setResize(editSource!.width, editSource!.height);
+    syncEdit();
+  });
+  $('cr-reset').addEventListener('click', () => {
+    draft.crop = fullCrop(draft);
+    syncEdit();
+  });
+
+  const keep = $<HTMLInputElement>('rs-keep');
+  keep.addEventListener('change', () => {
+    draft.keep = keep.checked;
+    // Turning it on snaps the height back to the original proportions.
+    if (draft.keep) setResize(draft.width, clamp(Math.round((draft.width * editSource!.height) / editSource!.width), 1, MAX_SIDE));
+    syncEdit();
+  });
+  for (const [id, axis] of [['rs-w', 'width'], ['rs-h', 'height']] as const) {
+    const input = $<HTMLInputElement>(id);
+    input.addEventListener('input', () => {
+      const v = readField(input, 1, MAX_SIDE);
+      if (v === null) return;
+      const src = editSource!;
+      let { width, height } = draft;
+      if (axis === 'width') {
+        width = v;
+        if (draft.keep) height = clamp(Math.round((v * src.height) / src.width), 1, MAX_SIDE);
+      } else {
+        height = v;
+        if (draft.keep) width = clamp(Math.round((v * src.width) / src.height), 1, MAX_SIDE);
+      }
+      setResize(width, height);
+      syncEdit(input);
+    });
+    input.addEventListener('change', () => syncEdit());
+  }
+  for (const [id, field] of [['cr-x', 'x'], ['cr-y', 'y'], ['cr-w', 'width'], ['cr-h', 'height']] as const) {
+    const input = $<HTMLInputElement>(id);
+    input.addEventListener('input', () => {
+      const c = draft.crop;
+      const limit = { x: draft.width - c.width, y: draft.height - c.height, width: draft.width - c.x, height: draft.height - c.y }[field];
+      const v = readField(input, field === 'x' || field === 'y' ? 0 : 1, limit);
+      if (v === null) return;
+      draft.crop = { ...c, [field]: v };
+      syncEdit(input);
+    });
+    input.addEventListener('change', () => syncEdit());
+  }
+
+  // Pointer editing: drag inside the area to move it, a handle to resize it, elsewhere to draw a new one.
+  const canvas = $('edit-canvas');
+  const cropEl = $('crop');
+  let mode: string | null = null;
+  let pointer = -1;
+  let start = { x: 0, y: 0 };
+  let startRect: Rect = draft.crop;
+  const toImage = (e: PointerEvent) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: clamp(((e.clientX - r.left) / r.width) * draft.width, 0, draft.width), y: clamp(((e.clientY - r.top) / r.height) * draft.height, 0, draft.height) };
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    // While the area is the whole image there's nothing to move, so a drag draws a new one.
+    mode = target.dataset.h ?? (target === cropEl && !isFull(draft.crop, draft) ? 'move' : 'new');
+    start = toImage(e);
+    startRect = { ...draft.crop };
+    pointer = e.pointerId;
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // Not capturable (e.g. a synthetic event): moves over the canvas still work.
+    }
+    if (mode !== 'new') cropEl.focus();
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!mode || e.pointerId !== pointer) return;
+    const p = toImage(e);
+    const dx = p.x - start.x;
+    const dy = p.y - start.y;
+    const r = startRect;
+    const W = draft.width;
+    const H = draft.height;
+    if (mode === 'move') {
+      draft.crop = { ...r, x: clamp(Math.round(r.x + dx), 0, W - r.width), y: clamp(Math.round(r.y + dy), 0, H - r.height) };
+    } else if (mode === 'new') {
+      // A click without a drag leaves the current area alone.
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      const x0 = Math.floor(Math.min(start.x, p.x));
+      const y0 = Math.floor(Math.min(start.y, p.y));
+      const x1 = Math.ceil(Math.max(start.x, p.x));
+      const y1 = Math.ceil(Math.max(start.y, p.y));
+      draft.crop = fitRect({ x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) }, W, H);
+    } else {
+      let left = r.x;
+      let top = r.y;
+      let right = r.x + r.width;
+      let bottom = r.y + r.height;
+      if (mode.includes('w')) left = clamp(Math.round(r.x + dx), 0, right - 1);
+      if (mode.includes('e')) right = clamp(Math.round(right + dx), left + 1, W);
+      if (mode.includes('n')) top = clamp(Math.round(r.y + dy), 0, bottom - 1);
+      if (mode.includes('s')) bottom = clamp(Math.round(bottom + dy), top + 1, H);
+      draft.crop = { x: left, y: top, width: right - left, height: bottom - top };
+    }
+    syncEdit();
+  });
+  const stop = () => (mode = null);
+  canvas.addEventListener('pointerup', stop);
+  canvas.addEventListener('pointercancel', stop);
+
+  // Keyboard: arrows move the area, Shift for 10 pixels.
+  cropEl.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 10 : 1;
+    const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const c = draft.crop;
+    draft.crop = { ...c, x: clamp(c.x + d[0], 0, draft.width - c.width), y: clamp(c.y + d[1], 0, draft.height - c.height) };
+    syncEdit();
   });
 }
 
@@ -755,4 +1153,5 @@ $('version').textContent = version;
 for (let i = 0; i < POOL_SIZE; i++) slots.push({ worker: spawn(), task: null });
 initSettings();
 initCompare();
+initEdit();
 initInput();

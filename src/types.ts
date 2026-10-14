@@ -19,6 +19,13 @@ export interface ConvertOptions {
    * PQ / HLG images to sRGB. Default `false`.
    */
   stripHdr?: boolean;
+  /**
+   * Scale to this size first. Lanczos3 for an axis that shrinks, bicubic for one that
+   * grows. Animation frames and HDR gain maps scale along.
+   */
+  resize?: { width: number; height: number };
+  /** Then keep only this rectangle, in (resized) pixels. */
+  crop?: { x: number; y: number; width: number; height: number };
   /** How hard to search for the smallest encoding. Default `default`. */
   effort?: Effort;
   /**
