@@ -104,7 +104,8 @@ npm install
 npm test             # vitest
 npm run build        # CLI + library → dist/
 npm run dev:web      # website on http://localhost:5173
-npm run build:web    # website → web/dist (deployed to GitHub Pages by .github/workflows/pages.yml)
+npm run build:web    # website → web/dist
+npm run build:pages  # website → docs/ (commit it; GitHub Pages serves main /docs)
 npm run fixtures     # regenerate test/fixtures (needs Pillow 11.3 or later, and ffmpeg for the 10-bit AVIF)
 ```
 
