@@ -3,6 +3,7 @@ import { decodePng, PNG_SIGNATURE } from './png.js';
 import { decodeGif } from './gif.js';
 import { decodeWebp } from './webp.js';
 import { decodeAvif, isAvif } from './avif.js';
+import { decodeJpeg, isJpeg } from './jpeg.js';
 import type { InputFormat, RasterImage } from '../types.js';
 
 export function detectFormat(b: Uint8Array): Exclude<InputFormat, 'apng'> | null {
@@ -10,6 +11,7 @@ export function detectFormat(b: Uint8Array): Exclude<InputFormat, 'apng'> | null
   if (b.length >= 6 && fourcc(b, 0) === 'GIF8') return 'gif';
   if (b.length >= 12 && fourcc(b, 0) === 'RIFF' && fourcc(b, 8) === 'WEBP') return 'webp';
   if (isAvif(b)) return 'avif';
+  if (isJpeg(b)) return 'jpeg';
   return null;
 }
 
@@ -29,8 +31,11 @@ export async function decode(input: Uint8Array): Promise<RasterImage> {
     case 'avif':
       img = await decodeAvif(input);
       break;
+    case 'jpeg':
+      img = await decodeJpeg(input);
+      break;
     default:
-      throw new Error('Unrecognised image format (expected PNG, APNG, GIF, WebP or AVIF)');
+      throw new Error('Unrecognised image format (expected PNG, APNG, GIF, WebP, AVIF or JPEG)');
   }
   return reduce16(img);
 }

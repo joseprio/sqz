@@ -10,14 +10,17 @@ const VARIANTS: Record<OutputFormat, Variant[]> = {
   webp: ['lossless', 'quantized', 'lossy'],
   avif: ['lossless', 'lossy'],
   gif: ['lossless', 'quantized'],
+  jpeg: ['lossy'],
 };
 const VARIANT_LABEL: Record<Variant, string> = { lossless: 'Lossless', quantized: 'Quantized', lossy: 'Lossy' };
-const FORMAT_LABEL: Record<OutputFormat, string> = { png: 'PNG', webp: 'WebP', avif: 'AVIF', gif: 'GIF' };
+const FORMAT_LABEL: Record<OutputFormat, string> = { png: 'PNG', webp: 'WebP', avif: 'AVIF', gif: 'GIF', jpeg: 'JPEG' };
+const EXTENSION: Record<OutputFormat, string> = { png: 'png', webp: 'webp', avif: 'avif', gif: 'gif', jpeg: 'jpg' };
 const FORMAT_HINTS: Record<OutputFormat, string> = {
-  png: 'Animations become APNG. Lossy versions: a ≤256-colour palette, and truecolor lossy filtering.',
-  webp: 'Animations stay animated. Lossy versions: a ≤256-colour palette stored losslessly, and regular lossy WebP.',
-  avif: 'Best for photos; animations become AVIF image sequences. Lossy version: regular lossy AVIF (4:4:4 when 4:2:0 can’t reach the target).',
+  png: 'Animations become APNG. Lossy versions: a ≤256-colour palette, and truecolor lossy filtering. HDR stays HDR (16-bit PQ) in the lossless version only.',
+  webp: 'Animations stay animated. Lossy versions: a ≤256-colour palette stored losslessly, and regular lossy WebP. SDR only: HDR is tone mapped.',
+  avif: 'Best for photos; animations become AVIF image sequences. Lossy version: regular lossy AVIF (4:4:4 when 4:2:0 can’t reach the target). HDR stays HDR: gain maps are kept, PQ/HLG uses 10–12 bits.',
   gif: 'At most 256 colours and no partial transparency, so lossless only works for images that already fit.',
+  jpeg: 'Lossy only, no animations; transparency is filled with white. HDR images become Ultra HDR JPEGs: an SDR photo plus a gain map.',
 };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -36,8 +39,9 @@ interface Settings {
   dither: boolean;
   max: boolean;
   strip: boolean;
+  stripHdr: boolean;
 }
-const DEFAULTS: Settings = { format: 'png', target: 80, dither: true, max: false, strip: false };
+const DEFAULTS: Settings = { format: 'png', target: 80, dither: true, max: false, strip: false, stripHdr: false };
 const STORE = 'sqz:settings:v2';
 
 function loadSettings(): Settings {
@@ -58,7 +62,7 @@ function saveSettings() {
 const settings = loadSettings();
 
 /** Settings that change the output, as a stable key (lossless-only formats ignore nothing, kept simple). */
-const settingsKey = (s: Settings) => `${s.format}|${s.target}|${s.dither}|${s.max}|${s.strip}`;
+const settingsKey = (s: Settings) => `${s.format}|${s.target}|${s.dither}|${s.max}|${s.strip}|${s.stripHdr}`;
 
 /** Short description of the settings a job ran with, e.g. "WebP · target 80 · max effort". */
 function settingsLabel(s: Settings): string {
@@ -66,6 +70,7 @@ function settingsLabel(s: Settings): string {
   if (!s.dither) parts.push('no dithering');
   if (s.max) parts.push('max effort');
   if (s.strip) parts.push('stripped');
+  if (s.stripHdr) parts.push('SDR only');
   return parts.join(' · ');
 }
 
@@ -125,8 +130,8 @@ function initSettings() {
     settings.target = Number(target.value);
     settingsChanged();
   });
-  for (const key of ['dither', 'max', 'strip'] as const) {
-    const box = $<HTMLInputElement>(key);
+  for (const [key, id] of [['dither', 'dither'], ['max', 'max'], ['strip', 'strip'], ['stripHdr', 'strip-hdr']] as const) {
+    const box = $<HTMLInputElement>(id);
     box.checked = settings[key];
     box.addEventListener('change', () => {
       settings[key] = box.checked;
@@ -148,10 +153,10 @@ interface Source {
 }
 const sources: Source[] = [];
 
-const ACCEPT = /\.(png|apng|gif|webp|avif)$/i;
+const ACCEPT = /\.(png|apng|gif|webp|avif|jpe?g)$/i;
 async function addFiles(files: Iterable<File>) {
   for (const file of files) {
-    if (!ACCEPT.test(file.name) && !/^image\/(png|apng|gif|webp|avif)$/.test(file.type)) continue;
+    if (!ACCEPT.test(file.name) && !/^image\/(png|apng|gif|webp|avif|jpeg)$/.test(file.type)) continue;
     const el = document.createElement('li');
     el.className = 'source';
     el.innerHTML = `<div class="thumb small"><img alt="" /></div><div class="info"><div class="name"></div><div class="meta"></div></div><button type="button" class="ghost icon remove" aria-label="Remove">✕</button>`;
@@ -365,7 +370,7 @@ function finishTask(slot: Slot, error?: string) {
   item.pending--;
   if (error) {
     const format = item.settings.format;
-    item.variants[variant] ??= { variant, format, size: 0, mimeType: '', extension: format, description: '', keptOriginal: false, warnings: [], error };
+    item.variants[variant] ??= { variant, format, size: 0, mimeType: '', extension: EXTENSION[format], description: '', keptOriginal: false, warnings: [], error };
   }
   if (item.pending === 0) {
     // Decoding failures hit every version alike: report them once, for the whole job.
@@ -396,6 +401,7 @@ function pump() {
       target: s.target,
       dither: s.dither,
       strip: s.strip,
+      stripHdr: s.stripHdr,
       effort: s.max ? 'max' : 'default',
     };
     slot.worker.postMessage({ id: task.id, input: item.source.input.slice(), options });
@@ -429,7 +435,8 @@ function autoSelect(item: Item) {
 
 // ---------- rendering ----------
 
-const outputName = (name: string, v: VariantResult) => `${name.replace(/\.[^.]+$/, '')}${v.variant === 'lossless' ? '' : `.${v.variant}`}.${v.extension}`;
+const outputName = (name: string, v: VariantResult) =>
+  `${name.replace(/\.[^.]+$/, '')}${v.variant === 'lossless' || VARIANTS[v.format].length === 1 ? '' : `.${v.variant}`}.${v.extension}`;
 
 function render(item: Item) {
   const el = item.el;
@@ -444,7 +451,10 @@ function render(item: Item) {
   const info = item.info;
   if (item.status === 'error') meta.textContent = item.error ?? 'Failed';
   else if (item.status === 'queued') meta.textContent = `${size} · waiting…`;
-  else meta.textContent = `${size}${info ? ` · ${info.width}×${info.height}${info.frames > 1 ? ` · ${info.frames} frames` : ''}` : ''}`;
+  else {
+    const hdr = info?.hdr ? ` · HDR ${info.hdr}${item.settings.stripHdr ? ' (stripped)' : ''}` : '';
+    meta.textContent = `${size}${info ? ` · ${info.width}×${info.height}${info.frames > 1 ? ` · ${info.frames} frames` : ''}${hdr}` : ''}`;
+  }
   if (info?.warnings.length) meta.title = info.warnings.join('\n');
 
   const dl = el.querySelector<HTMLAnchorElement>('.download')!;
@@ -683,7 +693,8 @@ function initInput() {
     }
   });
   input.addEventListener('change', () => {
-    if (input.files) void addFiles(input.files);
+    // Copy first: clearing the input empties the live FileList while addFiles awaits.
+    if (input.files) void addFiles([...input.files]);
     input.value = '';
   });
   let depth = 0;
@@ -703,7 +714,7 @@ function initInput() {
     e.preventDefault();
     depth = 0;
     document.body.classList.remove('dragging');
-    if (e.dataTransfer?.files.length) void addFiles(e.dataTransfer.files);
+    if (e.dataTransfer?.files.length) void addFiles([...e.dataTransfer.files]);
   });
   window.addEventListener('paste', (e) => {
     const files = [...(e.clipboardData?.files ?? [])];

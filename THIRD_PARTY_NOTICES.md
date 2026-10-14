@@ -13,4 +13,5 @@ the sources and versions pinned in `codecs/`:
 | [fhanau/zopfli](https://github.com/fhanau/zopfli) (commit 3315c43) | deflate at max effort (`src/wasm/sqz_zopfli_fhanau.*`) | Apache-2.0 |
 
 npm dependencies (installed separately, each under its own license): `@jsquash/webp`
-(Apache-2.0, libwebp under BSD-3-Clause), `image-q` (MIT), `omggif` (MIT), `fflate` (MIT).
+(Apache-2.0, libwebp under BSD-3-Clause), `@jsquash/jpeg` (Apache-2.0, MozJPEG under the
+IJG and BSD-3-Clause licenses), `image-q` (MIT), `omggif` (MIT), `fflate` (MIT).

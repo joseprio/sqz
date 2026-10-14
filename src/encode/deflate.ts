@@ -1,4 +1,5 @@
 import { zlibSync } from 'fflate';
+import { ectModule, fhanauModule } from '../codecs.js';
 import type { ZopfliModule } from '../wasm/sqz_zopfli_ect.js';
 
 /** Quick zlib stream, used to rank candidates and as the `fast` effort output. */
@@ -8,10 +9,6 @@ export function deflateFast(data: Uint8Array, level: 6 | 9 = 9): Uint8Array {
 
 // sqz's deflate engine is ECT's zopfli (codecs/zopfli): same output size as stock zopfli,
 // 2–4× faster. At max effort fhanau/zopfli also runs, since it occasionally wins.
-let ect: Promise<ZopfliModule> | undefined;
-let fhanau: Promise<ZopfliModule> | undefined;
-const ectModule = () => (ect ??= import('../wasm/sqz_zopfli_ect.js').then((m) => m.default()));
-const fhanauModule = () => (fhanau ??= import('../wasm/sqz_zopfli_fhanau.js').then((m) => m.default()));
 
 /** ECT mode 9 is its strongest preset (`ect -9`); more iterations made no difference in testing. */
 const ECT_LEVEL = 9;

@@ -1,6 +1,7 @@
 import { fourcc, u32be } from '../util/bytes.js';
 import { cicpChunk, exifChunk, iccpChunk, toDelay, xmpChunk } from '../util/meta.js';
 import { avifModule } from '../codecs.js';
+import { clliChunk } from '../process/hdr.js';
 import type { Frame, MetaChunk, RasterImage } from '../types.js';
 
 export function isAvif(b: Uint8Array): boolean {
@@ -33,6 +34,7 @@ export async function decodeAvif(buf: Uint8Array): Promise<RasterImage> {
     const srgb = (prim === 1 || prim === 2) && (trc === 13 || trc === 2);
     if (!srgb) chunks.push(cicpChunk(prim === 2 ? 1 : prim, trc === 2 ? 13 : trc, true));
   }
+  if (img.clli[0]) chunks.push(clliChunk(img.clli[0], img.clli[1]));
   if (img.exif) {
     const e = exifChunk(img.exif);
     if (e) chunks.push(e);
@@ -52,5 +54,6 @@ export async function decodeAvif(buf: Uint8Array): Promise<RasterImage> {
     chunks,
     format: 'avif',
     warnings: [],
+    gainMap: img.gainMap,
   };
 }

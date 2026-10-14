@@ -1,6 +1,6 @@
 # sqz
 
-Convert between PNG/APNG, GIF, WebP and AVIF, and squeeze the result as small as it can go.
+Convert between PNG/APNG, GIF, WebP, AVIF and JPEG, and squeeze the result as small as it can go. HDR included: Ultra HDR gain maps and PQ/HLG carry over wherever the output format can hold them.
 
 ```sh
 npx @joseprio/sqz animation.gif                  # → animation.png (animated APNG)
@@ -17,13 +17,13 @@ The same engine runs on the website at **https://joseprio.github.io/sqz/**. Ever
 | --- | --- | --- |
 | **Lossless** | Every visible pixel stays exactly the same. | PNG, WebP, AVIF, GIF (GIF only if the image already fits 256 colours with no partial transparency) |
 | **Quantized** | Reduced to a ≤256-colour palette (shared across animation frames), then stored losslessly. | PNG, WebP, GIF |
-| **Lossy** | The format's own lossy coding. For PNG that's truecolor lossy filtering, which rounds each pixel's filter prediction error so deflate compresses better. | PNG, WebP, AVIF |
+| **Lossy** | The format's own lossy coding. For PNG that's truecolor lossy filtering, which rounds each pixel's filter prediction error so deflate compresses better. | PNG, WebP, AVIF, JPEG |
 
-In the CLI, `-m lossless` writes one file and `-m lossy` writes every lossy version as `NAME.quantized.EXT` and `NAME.lossy.EXT`. AVIF has no palette coding, so it has no quantized version; GIF is always a palette, so it has no separate lossy version.
+In the CLI, `-m lossless` writes one file and `-m lossy` writes every lossy version as `NAME.quantized.EXT` and `NAME.lossy.EXT`. AVIF has no palette coding, so it has no quantized version; GIF is always a palette, so it has no separate lossy version. JPEG only has the lossy version, whatever the mode, and writes `NAME.jpg`.
 
 ### Quality targets (SSIMULACRA2)
 
-Lossy versions aren't driven by an encoder "quality" number. You choose a target **SSIMULACRA2** score (`-T`, default 80), and sqz searches for the cheapest setting whose output still reaches it: the fewest palette colours, the largest PNG lossy step, or the lowest WebP/AVIF quality.
+Lossy versions aren't driven by an encoder "quality" number. You choose a target **SSIMULACRA2** score (`-T`, default 80), and sqz searches for the cheapest setting whose output still reaches it: the fewest palette colours, the largest PNG lossy step, or the lowest WebP/AVIF/JPEG quality.
 
 | Score | Meaning |
 | --- | --- |
@@ -42,6 +42,7 @@ The SSIMULACRA2 implementation is a TypeScript port of the libjxl reference. It 
 
 - **PNG/APNG.** sqz has its own encoder. It picks the smallest exact colour type (palette at 1–8 bits, grayscale at 1–16 bits, `tRNS` keys, alpha dropped when unused), searches filter strategies (fixed, minimum-sum, entropy, Bigrams, BigEnt, brute force at several depths, lossy hints) and palette orders, then recompresses the winners with ECT's zopfli, which matches stock zopfli's size 2–4× faster. Max effort also tries fhanau/zopfli and keeps the smaller stream. Fully transparent pixels take whatever colour each filter predicts.
 - **WebP and AVIF.** libwebp (wasm, via jSquash) and sqz's own libavif + libaom wasm build, which supports animated AVIF (image sequences) in both directions, 10/12-bit input, and ICC/EXIF/XMP. Animated WebP is muxed by sqz from per-frame encodes. Lossy AVIF falls back to 4:4:4 when 4:2:0 can't reach the target.
+- **JPEG.** MozJPEG (wasm, via jSquash): progressive, optimised Huffman tables, trellis quantisation at max effort, 4:4:4 when 4:2:0 can't reach the target. Converting a JPEG to JPEG returns the original when re-encoding can't make it smaller. JPEG input is turned upright according to its EXIF orientation. CMYK JPEGs aren't supported.
 - **Animations** (APNG, WebP, AVIF, GIF). Identical frames are merged and their delays summed.
   For APNG, WebP and GIF, each later frame is also cropped to what changed, and unchanged pixels become transparent wherever that's valid. AVIF sequences use inter-frame prediction instead.
 - **Never bigger.** If the input is already a lossless file of the target format and sqz can't beat it, you get the original back (stripped if you asked).
@@ -51,12 +52,13 @@ The SSIMULACRA2 implementation is a TypeScript port of the libjxl reference. It 
 ```
 sqz [options] <file|dir|->...
 
-  -t, --to <format>      png (default) | webp | avif | gif
+  -t, --to <format>      png (default) | webp | avif | gif | jpeg
   -m, --mode <mode>      lossless (default) | lossy (writes the quantized and lossy versions)
   -T, --target <0-100>   lossy: SSIMULACRA2 score to aim for (default 80)
       --no-dither        quantized: map to nearest colour without dithering
       --max              maximum effort: slower, a little smaller
   -s, --strip            remove all metadata (ICC, EXIF, XMP, text, time, …)
+      --strip-hdr        SDR output only: drop gain maps, tone map PQ/HLG to sRGB
   -o, --out <path>       output file (single input), directory, or - for stdout
   -f, --force            overwrite existing files, including the input itself
   -r, --recursive        descend into directories
@@ -71,12 +73,28 @@ sqz never overwrites existing files, including the input itself, unless you pass
 npx @joseprio/sqz -t gif -m lossy clip.webp       # animated WebP → quantized GIF
 npx @joseprio/sqz -t avif -m lossy -T 70 -r photos -o out/
 npx @joseprio/sqz -f --max *.png                  # recompress PNGs in place
+npx @joseprio/sqz -t jpeg -T 85 hdr.avif          # → hdr.jpg (Ultra HDR)
 cat in.webp | npx @joseprio/sqz - -o - > out.png
 ```
 
+## HDR
+
+sqz understands two kinds of HDR input: **gain maps** (an SDR image plus a map that brightens it on HDR screens: Ultra HDR JPEG, read from ISO 21496-1 or Adobe hdrgm XMP metadata, and AVIF with a `tmap` gain map) and **PQ / HLG** images (16-bit PNG with `cICP`, 10/12-bit AVIF).
+
+| Output | Gain map input | PQ / HLG input |
+| --- | --- | --- |
+| AVIF | Gain map kept (base and map both re-encoded) | Stays PQ/HLG at 10 bits (lossy) or 10/12 bits (lossless, whichever is exact), with CICP and `clli` |
+| JPEG | Ultra HDR JPEG: gain map kept, written with MPF, ISO 21496-1 and hdrgm XMP | Ultra HDR JPEG: tone mapped SDR base plus a computed gain map (quarter size) |
+| Lossless PNG | Gain map applied: 16-bit BT.2020 PQ PNG with `cICP` and `cLLI` | Kept as is |
+| Quantized/lossy PNG, WebP, GIF | SDR base image, with a warning | Tone mapped to sRGB, with a warning |
+
+`--strip-hdr` (and the **Strip HDR** checkbox on the site) gives SDR everywhere: gain maps are dropped and PQ/HLG is tone mapped. `--strip` removes metadata but keeps the HDR signalling, since without it an HDR image would look wrong.
+
+Lossy HDR versions are scored on their 8-bit code values, a rough proxy: SSIMULACRA2 itself is defined for SDR.
+
 ## Metadata
 
-By default sqz keeps metadata. PNG output keeps colour information (`iCCP`, `sRGB`, `gAMA`, `cHRM`, `cICP`, …), EXIF, XMP, text and physical size, and converts WebP `ICCP`/`EXIF`/`XMP`, AVIF ICC/CICP/Exif/XMP and GIF comments into their PNG equivalents. WebP and AVIF output keep the ICC profile, EXIF and XMP. GIF output doesn't carry metadata, and sqz warns when something is dropped. `--strip` removes everything. Stripping an ICC profile can change how colours look in colour-managed viewers.
+By default sqz keeps metadata. PNG output keeps colour information (`iCCP`, `sRGB`, `gAMA`, `cHRM`, `cICP`, …), EXIF, XMP, text and physical size, and converts WebP `ICCP`/`EXIF`/`XMP`, AVIF ICC/CICP/Exif/XMP and GIF comments into their PNG equivalents. WebP, AVIF and JPEG output keep the ICC profile, EXIF and XMP (JPEG drops EXIF or XMP over 64 KB). GIF output doesn't carry metadata, and sqz warns when something is dropped. `--strip` removes everything. Stripping an ICC profile can change how colours look in colour-managed viewers.
 
 ## Library
 
@@ -93,7 +111,7 @@ Works in Node (20 or later) and in browsers or workers through any bundler that 
 
 ## Limitations
 
-- Quantized and lossy versions, and every non-PNG output, work at 8 bits per channel. Only lossless PNG keeps more (16-bit PNG input, and 10/12-bit AVIF input).
+- Quantized and lossy versions work at 8 bits per channel, except AVIF, which keeps 10 bits for high-depth input. Lossless PNG keeps 16 bits and lossless AVIF up to 12. WebP, GIF and JPEG are 8-bit (JPEG carries HDR as a gain map).
 - The quality search costs time: each step re-encodes (WebP/AVIF) or re-quantizes the image and scores it.
 - Frame delays under 20 ms (GIF) or 10 ms or less (WebP) are set to 100 ms, matching how browsers play them.
 

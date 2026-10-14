@@ -89,3 +89,7 @@ if shutil.which('ffmpeg'):
     print('photo-10bit.avif written')
 else:
     print('ffmpeg not found; photo-10bit.avif not regenerated')
+
+# JPEG and HDR fixtures.
+import runpy
+runpy.run_path(os.path.join(os.path.dirname(__file__), 'make-hdr-fixtures.py'))

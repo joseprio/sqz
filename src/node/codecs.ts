@@ -10,4 +10,6 @@ export function registerNodeCodecs() {
   wasmLoaders.webpDec ??= compile('@jsquash/webp/codec/dec/webp_dec.wasm');
   // jSquash picks the SIMD WebP encoder when available, which every supported Node has.
   wasmLoaders.webpEnc ??= compile('@jsquash/webp/codec/enc/webp_enc_simd.wasm');
+  wasmLoaders.jpegDec ??= compile('@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm');
+  wasmLoaders.jpegEnc ??= compile('@jsquash/jpeg/codec/enc/mozjpeg_enc.wasm');
 }

@@ -9,22 +9,28 @@ import type { ConvertOptions, ConvertResult, Mode, OutputFormat, Variant } from 
 import { describeTarget } from './process/bands.js';
 import { version } from '../package.json';
 
-const HELP = `sqz ${version} — convert between PNG/APNG, GIF, WebP and AVIF and squeeze the result
+const HELP = `sqz ${version} — convert between PNG/APNG, GIF, WebP, AVIF and JPEG and squeeze the result
 
 Usage: sqz [options] <file|dir|->...
 
 Output:
-  -t, --to <format>      png (default, APNG for animations) | webp | avif | gif
+  -t, --to <format>      png (default, APNG for animations) | webp | avif | gif | jpeg
   -m, --mode <mode>      lossless (default) | lossy
                          lossy writes two files: NAME.quantized.EXT (palette, ≤256
                          colours) and NAME.lossy.EXT (the format's own lossy coding).
                          GIF only has the quantized one, AVIF only the lossy one.
+                         JPEG is always lossy, whatever the mode.
   -T, --target <0-100>   lossy: SSIMULACRA2 score to aim for (default 80)
                            90+ visually indistinguishable · 80 excellent
                            70–80 generally acceptable · 60–70 web/game assets
       --no-dither        quantized: map to nearest colour without dithering
       --max              maximum effort: slower, a little smaller
   -s, --strip            remove all metadata (ICC, EXIF, XMP, text, time, …)
+      --strip-hdr        SDR output only: drop gain maps, tone map PQ/HLG to sRGB
+
+HDR: Ultra HDR JPEG and AVIF gain maps stay gain maps in AVIF and JPEG, and become
+16-bit PQ in lossless PNG. PQ/HLG images stay HDR in AVIF (10/12-bit) and lossless
+PNG, and become Ultra HDR in JPEG. Other outputs are 8-bit SDR.
 
 Files:
   -o, --out <path>       output file (single input), directory, or - for stdout
@@ -45,14 +51,16 @@ Examples:
   sqz animation.gif                         # → animation.png (APNG)
   sqz -t webp -m lossy photo.png            # → photo.quantized.webp + photo.lossy.webp
   sqz -t avif -m lossy -T 70 -r photos -o out/
+  sqz -t jpeg -T 85 hdr.avif                # → hdr.jpg (Ultra HDR)
   sqz -f --max *.png                        # recompress PNGs in place
   cat in.webp | sqz - -o - > out.png
 
 Run without installing: npx @joseprio/sqz …   Install: npm i -g @joseprio/sqz
 `;
 
-const EXTENSIONS = new Set(['.png', '.apng', '.gif', '.webp', '.avif']);
-const FORMATS: OutputFormat[] = ['png', 'webp', 'avif', 'gif'];
+const EXTENSIONS = new Set(['.png', '.apng', '.gif', '.webp', '.avif', '.jpg', '.jpeg']);
+const FORMATS: OutputFormat[] = ['png', 'webp', 'avif', 'gif', 'jpeg'];
+const EXT: Record<OutputFormat, string> = { png: 'png', webp: 'webp', avif: 'avif', gif: 'gif', jpeg: 'jpg' };
 const color = process.stderr.isTTY && !process.env.NO_COLOR;
 const paint = (code: number, s: string) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
 const red = (s: string) => paint(31, s);
@@ -162,6 +170,7 @@ async function main() {
         dither: { type: 'boolean', default: true },
         max: { type: 'boolean', default: false },
         strip: { type: 'boolean', short: 's', default: false },
+        'strip-hdr': { type: 'boolean', default: false },
         out: { type: 'string', short: 'o' },
         force: { type: 'boolean', short: 'f', default: false },
         recursive: { type: 'boolean', short: 'r', default: false },
@@ -183,18 +192,19 @@ async function main() {
     process.exit(process.stdin.isTTY ? 2 : 0);
   }
 
-  const format = v.to.toLowerCase().replace(/^apng$/, 'png') as OutputFormat;
-  if (!FORMATS.includes(format)) fail('--to must be png, webp, avif or gif');
+  const format = v.to.toLowerCase().replace(/^apng$/, 'png').replace(/^jpg$/, 'jpeg') as OutputFormat;
+  if (!FORMATS.includes(format)) fail('--to must be png, webp, avif, gif or jpeg');
+  const ext = EXT[format];
   const mode = v.mode as Mode;
   if (mode !== 'lossless' && mode !== 'lossy') fail('--mode must be lossless or lossy');
   const target = Number(v.target);
   if (!(target >= 0 && target <= 100)) fail('--target must be between 0 and 100');
   const { variantsFor } = await import('./index.js');
   const variants = variantsFor(format, mode);
-  const options: ConvertOptions = { format, variants, target, dither: v.dither, strip: v.strip, effort: v.max ? 'max' : 'default' };
+  const options: ConvertOptions = { format, variants, target, dither: v.dither, strip: v.strip, stripHdr: v['strip-hdr'], effort: v.max ? 'max' : 'default' };
 
   const files = await collect(args.positionals, v.recursive);
-  if (!files.length) fail('no PNG, APNG, GIF, WebP or AVIF files found');
+  if (!files.length) fail('no PNG, APNG, GIF, WebP, AVIF or JPEG files found');
 
   const toStdout = v.out === '-';
   if (toStdout && files.length !== 1) fail('--out - needs exactly one input');
@@ -208,17 +218,17 @@ async function main() {
     const k = join(dirname(f.file), basename(f.file, extname(f.file))).toLowerCase();
     stems.set(k, (stems.get(k) ?? 0) + 1);
   }
-  const suffix = (variant: Variant) => (variants.length > 1 ? `.${variant}.${format}` : `.${format}`);
+  const suffix = (variant: Variant) => (variants.length > 1 ? `.${variant}.${ext}` : `.${ext}`);
   const destination = (f: Input, variant: Variant): string => {
     if (f.file === '-' && v.out && !outIsDir) {
-      return variants.length > 1 ? v.out.replace(/(\.[^.\\/]+)?$/, (ext) => `.${variant}${ext || '.' + format}`) : v.out;
+      return variants.length > 1 ? v.out.replace(/(\.[^.\\/]+)?$/, (e) => `.${variant}${e || '.' + ext}`) : v.out;
     }
-    const ext = extname(f.file);
-    const clash = (stems.get(join(dirname(f.file), basename(f.file, ext)).toLowerCase()) ?? 0) > 1;
-    const stem = clash && ext.slice(1).toLowerCase() !== format ? basename(f.file) : basename(f.file, ext);
+    const own = extname(f.file);
+    const clash = (stems.get(join(dirname(f.file), basename(f.file, own)).toLowerCase()) ?? 0) > 1;
+    const stem = clash && own.slice(1).toLowerCase() !== ext ? basename(f.file) : basename(f.file, own);
     const name = stem + suffix(variant);
     if (!v.out) return join(dirname(f.file), name);
-    if (!outIsDir) return variants.length > 1 ? v.out.replace(/(\.[^.\\/]+)?$/, (e) => `.${variant}${e || '.' + format}`) : v.out;
+    if (!outIsDir) return variants.length > 1 ? v.out.replace(/(\.[^.\\/]+)?$/, (e) => `.${variant}${e || '.' + ext}`) : v.out;
     const rel = relative(f.base, dirname(f.file));
     return join(v.out, rel.startsWith('..') ? '' : rel, name);
   };
@@ -259,7 +269,8 @@ async function main() {
         const parts = await Promise.all(variants.map((variant) => pool.run(input.slice(), { ...options, variants: [variant] })));
         const res: ConvertResult = { ...parts[0], variants: parts.flatMap((p) => p.variants) };
         const secs = ((performance.now() - started) / 1000).toFixed(1);
-        log(`${label}  ${formatBytes(res.inputSize)}  ${dim(`${res.width}×${res.height}${res.frames > 1 ? `, ${res.frames} frames` : ''}, ${secs}s`)}`);
+        const hdr = res.hdr ? `, HDR ${res.hdr}${v['strip-hdr'] ? ' (stripped)' : ''}` : '';
+        log(`${label}  ${formatBytes(res.inputSize)}  ${dim(`${res.width}×${res.height}${res.frames > 1 ? `, ${res.frames} frames` : ''}${hdr}, ${secs}s`)}`);
         for (const w of res.warnings) log(`  ${yellow('warning')} ${w}`);
         let best = Infinity;
         for (const r of res.variants) {

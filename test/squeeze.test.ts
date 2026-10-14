@@ -7,7 +7,8 @@ import { readChunks } from '../src/decode/png.js';
 import type { RasterImage } from '../src/types.js';
 
 const dir = join(import.meta.dirname, 'fixtures');
-const fixtures = readdirSync(dir).filter((f) => /\.(png|gif|webp|avif)$/.test(f));
+// HDR fixtures change on purpose in SDR formats; test/hdr.test.ts covers them.
+const fixtures = readdirSync(dir).filter((f) => /\.(png|gif|webp|avif|jpg)$/.test(f) && !/^(hdr-|ultrahdr)/.test(f));
 const load = (f: string) => new Uint8Array(readFileSync(join(dir, f)));
 const fast: ConvertOptions = { effort: 'fast' };
 
@@ -70,6 +71,7 @@ describe('variants', () => {
     expect(variantsFor('webp', 'lossy')).toEqual(['quantized', 'lossy']);
     expect(variantsFor('gif', 'lossy')).toEqual(['quantized']);
     expect(variantsFor('avif', 'lossy')).toEqual(['lossy']);
+    expect(variantsFor('jpeg', 'lossless')).toEqual(['lossy']);
   });
 
   it('produces every variant in one call, decoding once', async () => {
@@ -91,7 +93,8 @@ describe('lossless round trips', () => {
         if (format === 'gif' && v.error) return void expect(v.error).toMatch(/256 colours|partial transparency/);
         expect(v.error).toBeUndefined();
         const out = await decode(v.data!);
-        // 16-bit precision survives only in PNG.
+        // 16-bit precision survives exactly only in PNG; AVIF keeps 12 bits.
+        if (src.depth === 16 && format === 'avif') return void expectSameAnimation(src, out, 16);
         expectSameAnimation(src.depth === 16 && format !== 'png' ? { ...src, frames: [] } : src, src.depth === 16 && format !== 'png' ? { ...out, frames: [] } : out);
       });
     }
@@ -132,7 +135,7 @@ describe('target search', () => {
     });
   }
 
-  for (const format of ['png', 'webp', 'avif'] as const) {
+  for (const format of ['png', 'webp', 'avif', 'jpeg'] as const) {
     it(`${format} lossy meets the target and shrinks with a lower one`, async () => {
       const input = load('natural.png');
       const hi = await one(input, { ...fast, format, variants: ['lossy'], target: 85 });

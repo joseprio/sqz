@@ -18,6 +18,17 @@ export interface Tuned<T> {
 
 const SAMPLE_FRAMES = 4;
 
+/**
+ * SSIMULACRA2 works on 8-bit sRGB. 16-bit samples are scored on their top 8 bits: for
+ * PQ / HLG that treats the code values as if they were sRGB, a rough but monotonic proxy.
+ */
+function to8(d: Uint8Array | Uint16Array): Uint8Array {
+  if (d instanceof Uint8Array) return d;
+  const out = new Uint8Array(d.length);
+  for (let i = 0; i < d.length; i++) out[i] = (d[i] * 255 + 32767) / 65535;
+  return out;
+}
+
 export function sampleIndices(n: number): number[] {
   if (n <= SAMPLE_FRAMES) return [...Array(n).keys()];
   return [...new Set([...Array(SAMPLE_FRAMES).keys()].map((i) => Math.round((i * (n - 1)) / (SAMPLE_FRAMES - 1))))];
@@ -29,12 +40,12 @@ export class FrameScorer {
 
   constructor(frames: Frame[], width: number, height: number) {
     this.indices = sampleIndices(frames.length);
-    this.scorers = this.indices.map((i) => new Ssimulacra2(frames[i].data as Uint8Array, width, height));
+    this.scorers = this.indices.map((i) => new Ssimulacra2(to8(frames[i].data), width, height));
   }
 
   /** `candidates[k]` corresponds to `indices[k]`. */
-  score(candidates: Uint8Array[]): number {
-    return Math.min(...this.scorers.map((s, k) => s.score(candidates[k])));
+  score(candidates: (Uint8Array | Uint16Array)[]): number {
+    return Math.min(...this.scorers.map((s, k) => s.score(to8(candidates[k]))));
   }
 }
 
@@ -91,17 +102,20 @@ export async function tuneColors(frames: Frame[], width: number, height: number,
   return { ...r, value: colorsAt(r.value) };
 }
 
-/** Lowest encoder quality (0–100) whose decoded output meets the target. */
-export async function tuneQuality(
+/**
+ * Lowest encoder quality (0–100) whose decoded output meets the target. `roundTrip`
+ * receives frames as they are: Uint8Array, or Uint16Array for 16-bit frames.
+ */
+export async function tuneQuality<T extends Uint8Array | Uint16Array>(
   frames: Frame[],
   width: number,
   height: number,
   target: number,
-  roundTrip: (rgba: Uint8Array, quality: number) => Promise<Uint8Array>,
+  roundTrip: (rgba: T, quality: number) => Promise<Uint8Array | Uint16Array>,
   onStep?: () => void,
 ): Promise<Tuned<number>> {
   const scorer = new FrameScorer(frames, width, height);
-  const sample = scorer.indices.map((i) => frames[i].data as Uint8Array);
+  const sample = scorer.indices.map((i) => frames[i].data as T);
   return cheapestPassing(100, 0, target, async (q) => scorer.score(await Promise.all(sample.map((d) => roundTrip(d, q)))), onStep);
 }
 
